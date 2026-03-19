@@ -36,6 +36,7 @@ namespace
             Tweaks::Install();
             Fixes::NordRaceStats::Install();
             logger::info("All hooks processed");
+            logger::info("Runtime trace note: installed hooks that never log a follow-up call were not exercised during the test session");
         }
     }
 }

@@ -16,6 +16,9 @@
 
 namespace
 {
+    inline constexpr std::uint32_t kInitialRuntimeTraceCount = 5;
+    inline constexpr std::uint32_t kPeriodicRuntimeTraceCount = 100;
+
     // Dump bytes at an address for debugging
     void DumpBytes(const char* label, std::uintptr_t addr, std::size_t count)
     {
@@ -63,6 +66,78 @@ namespace
         logger::error("  [SCAN] No E8 found within +/-{} bytes of +0x{:X}", searchRadius, expectedOffset);
         return 0;
     }
+
+    std::uint32_t NextTraceHit(std::atomic_uint32_t& a_counter)
+    {
+        auto hit = a_counter.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (hit <= kInitialRuntimeTraceCount || (hit % kPeriodicRuntimeTraceCount) == 0) {
+            return hit;
+        }
+
+        return 0;
+    }
+
+    const char* GetActorValueName(RE::ActorValue a_value)
+    {
+        auto* name = RE::ActorValueList::GetActorValueName(a_value);
+        return name ? name : "<unknown>";
+    }
+
+    const char* GetSpellTypeName(RE::MagicSystem::SpellType a_spellType)
+    {
+        switch (a_spellType) {
+        case RE::MagicSystem::SpellType::kSpell:
+            return "Spell";
+        case RE::MagicSystem::SpellType::kDisease:
+            return "Disease";
+        case RE::MagicSystem::SpellType::kPower:
+            return "Power";
+        case RE::MagicSystem::SpellType::kLesserPower:
+            return "LesserPower";
+        case RE::MagicSystem::SpellType::kAbility:
+            return "Ability";
+        case RE::MagicSystem::SpellType::kPoison:
+            return "Poison";
+        case RE::MagicSystem::SpellType::kEnchantment:
+            return "Enchantment";
+        case RE::MagicSystem::SpellType::kPotion:
+            return "Potion";
+        case RE::MagicSystem::SpellType::kWortCraft:
+            return "WortCraft";
+        case RE::MagicSystem::SpellType::kLeveledSpell:
+            return "LeveledSpell";
+        case RE::MagicSystem::SpellType::kAddiction:
+            return "Addiction";
+        case RE::MagicSystem::SpellType::kVoicePower:
+            return "VoicePower";
+        case RE::MagicSystem::SpellType::kStaffEnchantment:
+            return "StaffEnchantment";
+        case RE::MagicSystem::SpellType::kScroll:
+            return "Scroll";
+        default:
+            return "Unknown";
+        }
+    }
+
+    std::string DescribeForm(const RE::TESForm* a_form)
+    {
+        if (!a_form) {
+            return "<null>";
+        }
+
+        auto* name = a_form->GetName();
+        if (name && name[0] != '\0') {
+            return std::format("{} [form {:08X}]", name, a_form->GetFormID());
+        }
+
+        return std::format("<unnamed> [form {:08X}]", a_form->GetFormID());
+    }
+
+    void LogRuntimeTracePolicy(const char* a_hookName)
+    {
+        logger::info("  {} runtime trace active: first {} hits and every {}th hit thereafter",
+            a_hookName, kInitialRuntimeTraceCount, kPeriodicRuntimeTraceCount);
+    }
 }
 
 namespace Fixes
@@ -97,11 +172,17 @@ namespace Fixes
     // -------------------------------------------------------------------------
     namespace ScaleMovementSpeed
     {
+        std::atomic_uint32_t RuntimeTraceHits{ 0 };
+
         float Call(RE::TESObjectREFR* a_ref)
         {
             float scale = Callback(a_ref);
 
             if (a_ref == RE::PlayerCharacter::GetSingleton()) {
+                if (auto hit = NextTraceHit(RuntimeTraceHits)) {
+                    logger::info("Fixes: ScaleMovementSpeed call #{} — {} scale {:.4f} -> 1.0000",
+                        hit, DescribeForm(a_ref), scale);
+                }
                 return 1.0f;
             }
 
@@ -123,7 +204,48 @@ namespace Fixes
             DumpBytes("func prologue", baseAddr, 48);
             DumpBytes("around SE offset", baseAddr + seInnerOffset - 8, 32);
 
+            auto fixedCallAddr = FindNearestCall(baseAddr, seInnerOffset);
+            if (!fixedCallAddr) {
+                logger::error("Fixes: ScaleMovementSpeed SKIPPED â€” could not find CALL instruction");
+                DumpBytes("search area", baseAddr, 64);
+                return;
+            }
+
+            auto& fixedTrampoline = SKSE::GetTrampoline();
+            Callback = fixedTrampoline.write_call<5>(fixedCallAddr, Call);
+
+            logger::info("Fixes: ScaleMovementSpeed INSTALLED at {:X} (offset +0x{:X})",
+                fixedCallAddr, fixedCallAddr - baseAddr);
+            LogRuntimeTracePolicy("ScaleMovementSpeed");
+            return;
+
+#if 0
             auto callAddr = FindNearestCall(baseAddr, seInnerOffset);
+            if (!foundPattern) {
+                logger::error("Tweaks: AbsorptionChance SKIPPED â€” "
+                    "cannot find call+convert pattern near +0x{:X}", seInnerOffset);
+                DumpBytes("wide scan area", patchSite - 32, 96);
+                return;
+            }
+
+            auto adjustedSite = patchSite + patternDelta;
+            logger::info("  Adjusted patch site: {:X} (delta {})", adjustedSite, patternDelta);
+            DumpBytes("adjusted patch site", adjustedSite, 32);
+
+            auto& trampoline = SKSE::GetTrampoline();
+            trampoline.write_call<5>(adjustedSite, Call);
+
+            // Overwrite the remainder of cvttss2si eax, xmm0.
+            REL::safe_fill(adjustedSite + 5, REL::NOP, 3);
+
+            logger::info("Tweaks: AbsorptionChance INSTALLED at {:X} (adjusted offset +0x{:X})",
+                adjustedSite, adjustedSite - baseAddr);
+            logger::info("  Patch layout: 5 call + 3 NOP = 8 bytes");
+            LogRuntimeTracePolicy("AbsorptionChance");
+            return;
+
+#endif
+#if 0
             if (!callAddr) {
                 logger::error("Fixes: ScaleMovementSpeed SKIPPED — could not find CALL instruction");
                 DumpBytes("search area", baseAddr, 64);
@@ -135,6 +257,8 @@ namespace Fixes
 
             logger::info("Fixes: ScaleMovementSpeed INSTALLED at {:X} (offset +0x{:X})",
                 callAddr, callAddr - baseAddr);
+            LogRuntimeTracePolicy("ScaleMovementSpeed");
+#endif
         }
     }
 
@@ -151,15 +275,99 @@ namespace Tweaks
     // -------------------------------------------------------------------------
     namespace AbsorptionChance
     {
+        std::atomic_uint32_t RuntimeTraceHits{ 0 };
+
         std::uint32_t Call(RE::ActorValueOwner* a_owner, RE::ActorValue a_akValue)
         {
+            if (!a_owner) {
+                logger::error("Tweaks: AbsorptionChance called with a null ActorValueOwner");
+                return 0;
+            }
+
             float value = a_owner->GetActorValue(a_akValue);
 
             auto* gmst = RE::GameSettingCollection::GetSingleton();
             auto* setting = gmst ? gmst->GetSetting("fPlayerMaxResistance") : nullptr;
             float cap = setting ? setting->GetFloat() : 85.0f;
+            auto clamped = static_cast<std::uint32_t>((std::min)(value, cap));
 
-            return static_cast<std::uint32_t>((std::min)(value, cap));
+            if (auto hit = NextTraceHit(RuntimeTraceHits)) {
+                logger::info("Tweaks: AbsorptionChance call #{} — AV {} ({}) raw {:.2f}, cap {:.2f}, result {}",
+                    hit,
+                    GetActorValueName(a_akValue),
+                    static_cast<std::uint32_t>(a_akValue),
+                    value,
+                    cap,
+                    clamped);
+            }
+
+            return clamped;
+        }
+
+        void InstallImpl()
+        {
+            constexpr std::uintptr_t funcOffset = 0x639720;
+            constexpr std::ptrdiff_t seInnerOffset = 0x53;
+
+            auto baseAddr = REL::Offset(funcOffset).address();
+            logger::info("Tweaks: AbsorptionChance â€” base addr: {:X}", baseAddr);
+            DumpBytes("func prologue", baseAddr, 48);
+            DumpBytes("around SE offset", baseAddr + seInnerOffset - 8, 32);
+
+            // In VR the SE direct call site became:
+            //   mov r8, [rdi+0x18]
+            //   call qword ptr [r8+0x08]
+            //   cvttss2si eax, xmm0
+            //
+            // This tweak replaces the entire 8-byte call+convert block with:
+            //   call Call
+            //   nop nop nop
+            auto patchSite = baseAddr + seInnerOffset;
+            bool foundPattern = false;
+            std::ptrdiff_t patternDelta = 0;
+
+            for (std::ptrdiff_t scan = -32; scan <= 32; ++scan) {
+                auto scanAddr = patchSite + scan;
+                auto* bytes = reinterpret_cast<std::uint8_t*>(scanAddr);
+
+                if (bytes[0] == 0x41 &&
+                    bytes[1] == 0xFF &&
+                    bytes[2] == 0x50 &&
+                    bytes[3] == 0x08 &&
+                    bytes[4] == 0xF3 &&
+                    bytes[5] == 0x0F &&
+                    bytes[6] == 0x2C &&
+                    bytes[7] == 0xC0) {
+                    foundPattern = true;
+                    patternDelta = scan;
+                    logger::info(
+                        "  [SCAN] Found FF 50 08 + F3 0F 2C C0 pattern at delta {} from expected",
+                        patternDelta);
+                    break;
+                }
+            }
+
+            if (!foundPattern) {
+                logger::error("Tweaks: AbsorptionChance SKIPPED â€” "
+                    "cannot find call+convert pattern near +0x{:X}", seInnerOffset);
+                DumpBytes("wide scan area", patchSite - 32, 96);
+                return;
+            }
+
+            auto adjustedSite = patchSite + patternDelta;
+            logger::info("  Adjusted patch site: {:X} (delta {})", adjustedSite, patternDelta);
+            DumpBytes("adjusted patch site", adjustedSite, 32);
+
+            auto& trampoline = SKSE::GetTrampoline();
+            trampoline.write_call<5>(adjustedSite, Call);
+
+            // Overwrite the remainder of cvttss2si eax, xmm0.
+            REL::safe_fill(adjustedSite + 5, REL::NOP, 3);
+
+            logger::info("Tweaks: AbsorptionChance INSTALLED at {:X} (adjusted offset +0x{:X})",
+                adjustedSite, adjustedSite - baseAddr);
+            logger::info("  Patch layout: 5 call + 3 NOP = 8 bytes");
+            LogRuntimeTracePolicy("AbsorptionChance");
         }
 
         void Install()
@@ -169,6 +377,10 @@ namespace Tweaks
                 return;
             }
 
+            InstallImpl();
+            return;
+
+#if 0
             constexpr std::uintptr_t funcOffset = 0x639720;
             constexpr std::ptrdiff_t seInnerOffset = 0x53;
 
@@ -177,7 +389,40 @@ namespace Tweaks
             DumpBytes("func prologue", baseAddr, 48);
             DumpBytes("around SE offset", baseAddr + seInnerOffset - 8, 32);
 
-            auto callAddr = FindNearestCall(baseAddr, seInnerOffset);
+            auto patchSite = baseAddr + seInnerOffset;
+            std::uintptr_t callAddr = 0;
+
+            // In VR the SE direct call site became:
+            //   mov r8, [rdi+0x18]
+            //   call qword ptr [r8+0x08]
+            //   cvttss2si eax, xmm0
+            //
+            // This tweak replaces the entire 8-byte call+convert block with:
+            //   call Call
+            //   nop nop nop
+            bool foundPattern = false;
+            std::ptrdiff_t patternDelta = 0;
+
+            for (std::ptrdiff_t scan = -32; scan <= 32; ++scan) {
+                auto scanAddr = patchSite + scan;
+                auto* bytes = reinterpret_cast<std::uint8_t*>(scanAddr);
+
+                if (bytes[0] == 0x41 &&
+                    bytes[1] == 0xFF &&
+                    bytes[2] == 0x50 &&
+                    bytes[3] == 0x08 &&
+                    bytes[4] == 0xF3 &&
+                    bytes[5] == 0x0F &&
+                    bytes[6] == 0x2C &&
+                    bytes[7] == 0xC0) {
+                    foundPattern = true;
+                    patternDelta = scan;
+                    logger::info(
+                        "  [SCAN] Found FF 50 08 + F3 0F 2C C0 pattern at delta {} from expected",
+                        patternDelta);
+                    break;
+                }
+            }
             if (!callAddr) {
                 logger::error("Tweaks: AbsorptionChance SKIPPED — could not find CALL instruction");
                 DumpBytes("search area", baseAddr + seInnerOffset - 32, 80);
@@ -192,6 +437,8 @@ namespace Tweaks
 
             logger::info("Tweaks: AbsorptionChance INSTALLED at {:X} (offset +0x{:X})",
                 callAddr, callAddr - baseAddr);
+            LogRuntimeTracePolicy("AbsorptionChance");
+#endif
         }
     }
 
@@ -201,9 +448,16 @@ namespace Tweaks
     // -------------------------------------------------------------------------
     namespace ConcentrationCasting
     {
+        std::atomic_uint32_t RuntimeTraceHits{ 0 };
+
         bool Call(RE::ActorValueOwner* a_avOwner, RE::ActorValue a_akValue,
                   RE::MagicItem* a_spell, float a_cost, bool a_usePermanent)
         {
+            if (!a_avOwner) {
+                logger::error("Tweaks: ConcentrationCasting called with a null ActorValueOwner");
+                return false;
+            }
+
             float available;
             if (a_usePermanent) {
                 available = a_avOwner->GetPermanentActorValue(a_akValue);
@@ -211,12 +465,43 @@ namespace Tweaks
                 available = a_avOwner->GetActorValue(a_akValue);
             }
 
-            if (a_spell->GetSpellType() == RE::MagicSystem::SpellType::kSpell) {
-                float baseValue = a_avOwner->GetBaseActorValue(a_akValue);
-                return (baseValue >= a_cost) && (available >= a_cost);
+            auto spellType = a_spell ? a_spell->GetSpellType() : RE::MagicSystem::SpellType::kSpell;
+            float baseValue = 0.0f;
+            bool allowed;
+
+            if (spellType == RE::MagicSystem::SpellType::kSpell) {
+                baseValue = a_avOwner->GetBaseActorValue(a_akValue);
+                allowed = (baseValue >= a_cost) && (available >= a_cost);
+            } else {
+                allowed = available >= a_cost;
             }
 
-            return available >= a_cost;
+            if (auto hit = NextTraceHit(RuntimeTraceHits)) {
+                auto baseValueText = spellType == RE::MagicSystem::SpellType::kSpell ?
+                    std::format("{:.2f}", baseValue) :
+                    "n/a";
+                logger::info(
+                    "Tweaks: ConcentrationCasting call #{} — spell {} type {} cost {:.2f}, available {:.2f}, base {}, permanent {}, allowed {}",
+                    hit,
+                    DescribeForm(a_spell),
+                    GetSpellTypeName(spellType),
+                    a_cost,
+                    available,
+                    baseValueText,
+                    a_usePermanent,
+                    allowed);
+            }
+
+            if (!a_spell) {
+                logger::warn("Tweaks: ConcentrationCasting received a null MagicItem");
+                return allowed;
+            }
+
+            if (a_spell->GetSpellType() == RE::MagicSystem::SpellType::kSpell) {
+                return allowed;
+            }
+
+            return allowed;
         }
 
         void Install()
@@ -319,6 +604,7 @@ namespace Tweaks
                 adjustedSite, adjustedSite - baseAddr);
             logger::info("  Patch layout: {} setup + {} call + {} NOP = {} bytes",
                 kSetupSize, kCallSize, kNopSize, kPatchRegionSize);
+            LogRuntimeTracePolicy("ConcentrationCasting");
         }
     }
 
@@ -327,13 +613,20 @@ namespace Tweaks
     // -------------------------------------------------------------------------
     namespace JumpHeight
     {
+        std::atomic_uint32_t RuntimeTraceHits{ 0 };
+
         float GetScale(RE::TESObjectREFR* a_ref)
         {
             float scale = OriginalGetScale(a_ref);
 
             auto* actor = a_ref->As<RE::Actor>();
             if (actor && actor == RE::PlayerCharacter::GetSingleton() && actor->IsSneaking()) {
-                scale *= Settings::SneakJumpHeightMod;
+                float adjustedScale = scale * Settings::SneakJumpHeightMod;
+                if (auto hit = NextTraceHit(RuntimeTraceHits)) {
+                    logger::info("Tweaks: SneakJumpHeight call #{} — {} scale {:.4f} * {:.2f} = {:.4f}",
+                        hit, DescribeForm(actor), scale, Settings::SneakJumpHeightMod, adjustedScale);
+                }
+                return adjustedScale;
             }
 
             return scale;
@@ -366,6 +659,7 @@ namespace Tweaks
 
             logger::info("Tweaks: SneakJumpHeight INSTALLED at {:X} (offset +0x{:X})",
                 callAddr, callAddr - baseAddr);
+            LogRuntimeTracePolicy("SneakJumpHeight");
         }
     }
 
