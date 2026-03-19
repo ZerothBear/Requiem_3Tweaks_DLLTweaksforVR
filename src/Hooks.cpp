@@ -201,20 +201,18 @@ namespace Tweaks
     // -------------------------------------------------------------------------
     namespace ConcentrationCasting
     {
-        bool Call(RE::Actor* a_actor, RE::ActorValue a_akValue, RE::MagicItem* a_spell,
-                  float a_cost, bool a_usePermanent)
+        bool Call(RE::ActorValueOwner* a_avOwner, RE::ActorValue a_akValue,
+                  RE::MagicItem* a_spell, float a_cost, bool a_usePermanent)
         {
-            auto* avOwner = a_actor->AsActorValueOwner();
-
             float available;
             if (a_usePermanent) {
-                available = avOwner->GetPermanentActorValue(a_akValue);
+                available = a_avOwner->GetPermanentActorValue(a_akValue);
             } else {
-                available = avOwner->GetActorValue(a_akValue);
+                available = a_avOwner->GetActorValue(a_akValue);
             }
 
             if (a_spell->GetSpellType() == RE::MagicSystem::SpellType::kSpell) {
-                float baseValue = avOwner->GetBaseActorValue(a_akValue);
+                float baseValue = a_avOwner->GetBaseActorValue(a_akValue);
                 return (baseValue >= a_cost) && (available >= a_cost);
             }
 
@@ -235,16 +233,12 @@ namespace Tweaks
             logger::info("Tweaks: ConcentrationCasting — base addr: {:X}", baseAddr);
             DumpBytes("func prologue", baseAddr, 48);
 
-            // The SE version uses a complex inline patch with register setup.
-            // For VR, we need to find the right patch site.
-            // The original checks for byte pattern FF 90 A8 02 00 00 at offset+0x1E
-            // which is: call qword ptr [rax+0x2A8] (virtual call to GetSpellType)
-
+            // Find the patch site by scanning for the GetSpellType virtual call
+            // pattern: FF 90 A8 02 00 00 = call qword ptr [rax+0x2A8]
+            // In VR this should be at patchSite + 0x1E (with possible small delta)
             auto patchSite = baseAddr + seInnerOffset;
-            DumpBytes("SE patch site", patchSite - 8, 64);
+            DumpBytes("SE patch site", patchSite - 8, 96);
 
-            // Look for the FF 90 A8 02 00 00 pattern (call [rax+0x2A8]) in a wider range
-            // This is the anchor point the original uses for validation
             bool foundPattern = false;
             std::ptrdiff_t patternDelta = 0;
 
@@ -268,27 +262,63 @@ namespace Tweaks
                 return;
             }
 
-            // Adjust our patch site by the same delta
+            // The adjusted site starts at the "cmp byte ptr [rsp+0xD8], 0" instruction
+            // which begins the entire comparison block we're replacing.
             auto adjustedSite = patchSite + patternDelta;
             logger::info("  Adjusted patch site: {:X} (delta {})", adjustedSite, patternDelta);
             DumpBytes("adjusted patch site", adjustedSite, 64);
 
-            // Write the inline patch sequence (from original decompilation):
-            // The original writes register setup bytes, then a trampoline call, then NOPs
-            auto& trampoline = SKSE::GetTrampoline();
+            // Validate that the patch site starts with cmp byte ptr [rsp+0xD8], 0
+            // Expected: 80 BC 24 D8 00 00 00 00
+            if (*reinterpret_cast<std::uint8_t*>(adjustedSite) != 0x80 ||
+                *reinterpret_cast<std::uint8_t*>(adjustedSite + 1) != 0xBC ||
+                *reinterpret_cast<std::uint8_t*>(adjustedSite + 2) != 0x24) {
+                logger::error("Tweaks: ConcentrationCasting SKIPPED — "
+                    "unexpected instruction at patch site (expected cmp [rsp+...])");
+                return;
+            }
+
+            // ---------------------------------------------------------------
+            // VR register state at the patch site:
+            //   rcx = ActorValueOwner*     → param 1 (already correct)
+            //   edx = ActorValue enum      → param 2 (already correct)
+            //   rdi = MagicItem*           → param 3 (needs mov r8, rdi)
+            //   xmm7 = cost (float)        → param 4 (needs movaps xmm3, xmm7)
+            //   [rsp+0xD8] = usePermanent  → param 5 (load to al, store to [rsp+0x20])
+            //
+            // We replace 0x38 (56) bytes: the entire comparison block from
+            // "cmp byte ptr [rsp+0xD8], 0" through "setae al", leaving the
+            // subsequent "movaps xmm6, [rsp+0x60]; mov [rsp+??], al" intact
+            // to restore xmm6 and store our bool result from al.
+            // ---------------------------------------------------------------
+
+            constexpr std::size_t kPatchRegionSize = 0x38; // 56 bytes
+
+            // Build the inline setup + call
+            std::uint8_t setup[] = {
+                0x49, 0x89, 0xF8,                               // mov r8, rdi           (MagicItem*)
+                0x0F, 0x28, 0xDF,                               // movaps xmm3, xmm7    (cost)
+                0x8A, 0x84, 0x24, 0xD8, 0x00, 0x00, 0x00,      // mov al, [rsp+0xD8]   (usePermanent)
+                0x88, 0x44, 0x24, 0x20,                         // mov [rsp+0x20], al   (5th param)
+            };
+            constexpr std::size_t kSetupSize = sizeof(setup);   // 17 bytes
+            constexpr std::size_t kCallSize = 5;                // E8 + rel32
+            constexpr std::size_t kNopSize = kPatchRegionSize - kSetupSize - kCallSize; // 34 bytes
 
             // Write setup bytes
-            std::uint8_t setup[] = {
-                0x48, 0x8B, 0x9B,                         // mov rbx, [rbx+rax] (3 bytes)
-                // ... padding will be part of the call
-            };
-            // Actually, the safest VR approach: just write the trampoline call
-            // at the found location and NOP the rest
-            trampoline.write_call<5>(adjustedSite + 0x1A, Call);
-            REL::safe_fill(adjustedSite + 0x1F, REL::NOP, 0x19);
+            REL::safe_write(adjustedSite, setup, kSetupSize);
+
+            // Write trampoline call to our ConcentrationCasting::Call
+            auto& trampoline = SKSE::GetTrampoline();
+            trampoline.write_call<5>(adjustedSite + kSetupSize, Call);
+
+            // NOP the remaining bytes
+            REL::safe_fill(adjustedSite + kSetupSize + kCallSize, REL::NOP, kNopSize);
 
             logger::info("Tweaks: ConcentrationCasting INSTALLED at {:X} (adjusted offset +0x{:X})",
                 adjustedSite, adjustedSite - baseAddr);
+            logger::info("  Patch layout: {} setup + {} call + {} NOP = {} bytes",
+                kSetupSize, kCallSize, kNopSize, kPatchRegionSize);
         }
     }
 

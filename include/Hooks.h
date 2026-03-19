@@ -30,8 +30,8 @@ namespace Tweaks
 
     namespace ConcentrationCasting
     {
-        bool Call(RE::Actor* a_actor, RE::ActorValue a_akValue, RE::MagicItem* a_spell,
-                  float a_cost, bool a_usePermanent);
+        bool Call(RE::ActorValueOwner* a_avOwner, RE::ActorValue a_akValue,
+                  RE::MagicItem* a_spell, float a_cost, bool a_usePermanent);
     }
 
     namespace JumpHeight
