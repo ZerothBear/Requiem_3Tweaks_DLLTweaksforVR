@@ -43,7 +43,7 @@ namespace
 SKSEPluginInfo(
         .Version = Plugin::VERSION,
         .Name = Plugin::NAME.data(),
-        .Author = "spyde",
+        .Author = "ZerothBear",
         .StructCompatibility = SKSE::StructCompatibility::Independent,
         .RuntimeCompatibility = SKSE::VersionIndependence::AddressLibrary);
 
