@@ -1,0 +1,67 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 31
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "architecture": "x64",
+      "generator": "Visual Studio 17 2022",
+      "cacheVariables": {
+        "BUILD_TESTS": "OFF",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/extern/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/ports/",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
+        "CMAKE_CXX_FLAGS": "/EHsc /MP /W4 /WX $penv{CXXFLAGS}"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "intelliSenseMode": "windows-msvc-x64",
+          "enableMicrosoftCodeAnalysis": true,
+          "enableClangTidyCodeAnalysis": true
+        }
+      },
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "build-release-vr",
+      "inherits": [
+        "base"
+      ],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ENABLE_SKYRIM_VR": "ON",
+        "ENABLE_SKYRIM_SE": "OFF",
+        "ENABLE_SKYRIM_AE": "OFF"
+      }
+    },
+    {
+      "name": "build-debug-vr",
+      "inherits": [
+        "base"
+      ],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ENABLE_SKYRIM_VR": "ON",
+        "ENABLE_SKYRIM_SE": "OFF",
+        "ENABLE_SKYRIM_AE": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release-vr",
+      "configurePreset": "build-release-vr",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "debug-vr",
+      "configurePreset": "build-debug-vr",
+      "configuration": "Debug"
+    }
+  ]
+}
