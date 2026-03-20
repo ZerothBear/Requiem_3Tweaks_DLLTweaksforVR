@@ -1,0 +1,114 @@
+{
+    "modName": "DLLTweaksVR",
+    "displayName": "DLL Tweaks VR",
+    "minMcmVersion": 9,
+    "cursorFillMode": "topToBottom",
+    "content": [],
+    "customContent": {},
+    "pages": [
+        {
+            "pageDisplayName": "Settings",
+            "cursorFillMode": "topToBottom",
+            "content": [
+                {
+                    "text": "Fixes",
+                    "type": "header"
+                },
+                {
+                    "id": "bNordRaceStats:Fixes",
+                    "text": "Enable Nord Race Stats Fix",
+                    "type": "toggle",
+                    "help": "Applies the Nord race stat recalculation fix. Enabling after startup can apply it immediately, but disabling it fully requires a restart.",
+                    "valueOptions": {
+                        "sourceType": "ModSettingBool"
+                    }
+                },
+                {
+                    "id": "bScaleMovementSpeed:Fixes",
+                    "text": "Enable Scale Movement Speed",
+                    "type": "toggle",
+                    "help": "Prevents player movement speed from scaling with race height.",
+                    "valueOptions": {
+                        "sourceType": "ModSettingBool"
+                    }
+                },
+                {
+                    "text": "Tweaks",
+                    "type": "header"
+                },
+                {
+                    "id": "bAbsorptionChance:Tweaks",
+                    "text": "Enable Absorption Chance Cap",
+                    "type": "toggle",
+                    "help": "Caps the effective spell absorption chance to the configured maximum.",
+                    "valueOptions": {
+                        "sourceType": "ModSettingBool"
+                    }
+                },
+                {
+                    "id": "fAbsorptionChanceCap:Tweaks",
+                    "text": "Absorption Chance Cap",
+                    "type": "slider",
+                    "help": "Maximum effective spell absorption chance used by the tweak.",
+                    "valueOptions": {
+                        "min": 0.0,
+                        "max": 100.0,
+                        "step": 1.0,
+                        "formatString": "{0}%",
+                        "sourceType": "ModSettingFloat"
+                    }
+                },
+                {
+                    "id": "bConcentrationCasting:Tweaks",
+                    "text": "Enable Concentration Casting Check",
+                    "type": "toggle",
+                    "help": "Prevents concentration spells from casting when their per-second cost exceeds total magicka.",
+                    "valueOptions": {
+                        "sourceType": "ModSettingBool"
+                    }
+                },
+                {
+                    "id": "bSneakJumpHeight:Tweaks",
+                    "text": "Enable Sneak Jump Height",
+                    "type": "toggle",
+                    "help": "Applies the sneak jump height modifier while the player is sneaking.",
+                    "valueOptions": {
+                        "sourceType": "ModSettingBool"
+                    }
+                },
+				{
+                    "id": "fSneakJumpModifier:Tweaks",
+                    "text": "Sneak Jump Modifier",
+                    "type": "slider",
+                    "help": "Multiplier applied to jump height while sneaking. 1.00 keeps the normal jump height.",
+                    "valueOptions": {
+                        "min": 0.0,
+                        "max": 1.0,
+                        "step": 0.05,
+                        "formatString": "{1}",
+                        "sourceType": "ModSettingFloat"
+                    }
+                }
+            ]
+        },
+        {
+            "pageDisplayName": "Debugging and Maintenance",
+            "cursorFillMode": "topToBottom",
+            "content": [
+                {
+                    "text": "Debugging",
+                    "type": "header"
+                },
+                {
+                    "id": "bDebugging:Debug",
+                    "text": "Enable Debug Logging",
+                    "type": "toggle",
+                    "help": "Enables verbose native startup diagnostics and runtime hook trace logging in DLLTweaksVR.log.",
+                    "valueOptions": {
+                        "sourceType": "ModSettingBool"
+                    }
+                }
+            ]
+        }
+    ]
+}

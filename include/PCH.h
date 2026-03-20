@@ -4,7 +4,11 @@
 #include "REL/Relocation.h"
 #include "SKSE/SKSE.h"
 
+#include <algorithm>
 #include <atomic>
+#include <filesystem>
+#include <list>
+#include <string_view>
 #define WIN32_LEAN_AND_MEAN
 #include <ClibUtil/simpleINI.hpp>
 #include <spdlog/sinks/basic_file_sink.h>

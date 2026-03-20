@@ -1,5 +1,6 @@
 #include "PCH.h"
 #include "Hooks.h"
+#include "Papyrus.h"
 #include "Settings.h"
 
 namespace
@@ -30,13 +31,17 @@ namespace
     void OnMessage(SKSE::MessagingInterface::Message* a_message)
     {
         if (a_message->type == SKSE::MessagingInterface::kDataLoaded) {
-            logger::info("kDataLoaded received — installing hooks");
+            logger::info("kDataLoaded received - loading settings and installing hooks");
             Settings::Load();
             Fixes::Install();
             Tweaks::Install();
             Fixes::NordRaceStats::Install();
             logger::info("All hooks processed");
-            logger::info("Runtime trace note: installed hooks that never log a follow-up call were not exercised during the test session");
+            if (Settings::Debugging.load(std::memory_order_relaxed)) {
+                logger::info("Runtime trace note: installed hooks that never log a follow-up call were not exercised during the test session");
+            } else {
+                logger::info("Verbose debug logging is disabled; enable Debugging in the MCM to capture hook traces");
+            }
         }
     }
 }
@@ -59,11 +64,16 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
 
     SKSE::AllocTrampoline(256);
 
+    if (!SKSE::GetPapyrusInterface()->Register(Papyrus::Register)) {
+        stl::report_and_fail("Unable to register Papyrus bindings."sv);
+    }
+
     if (!SKSE::GetMessagingInterface()->RegisterListener(OnMessage)) {
         stl::report_and_fail("Unable to register message listener."sv);
     }
 
-    logger::info("Message listener registered — waiting for kDataLoaded");
+    logger::info("Papyrus bindings registered");
+    logger::info("Message listener registered - waiting for kDataLoaded");
 
     return true;
 }

@@ -11,6 +11,7 @@ if (ZIP_TO_DIST)
 
   set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PACKAGE_CONFIG_SUFFIX}-${PROJECT_VERSION}")
 
+  install(DIRECTORY "${CMAKE_SOURCE_DIR}/data/" DESTINATION ".")
   install(FILES "$<TARGET_FILE:${PROJECT_NAME}>" DESTINATION "SKSE/Plugins")
   include(CPack)
 
@@ -31,6 +32,7 @@ if (AUTO_PLUGIN_DEPLOYMENT)
       if (EXISTS "${DEPLOY_TARGET}")
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E echo "Deploying to ${DEPLOY_TARGET}"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/data" "${DEPLOY_TARGET}"
                 COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY_TARGET}/SKSE/Plugins"
                 COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> "${DEPLOY_TARGET}/SKSE/Plugins/"
         )
